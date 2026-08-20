@@ -63,3 +63,48 @@ export async function fetchDongs(guCode) {
   const features = await fetchVworldFeatures('LT_C_ADEMD_INFO', `emd_cd:like:${guCode}`);
   return features.map((f) => f.properties.emd_kor_nm).filter(Boolean);
 }
+
+export async function reverseGeocode(lat, lng) {
+  const { key, domain } = credentials();
+  if (!key) throw new Error('VWORLD_API_KEY 환경변수가 설정되지 않았습니다.');
+
+  const params = new URLSearchParams({
+    service: 'address',
+    request: 'getaddress',
+    version: '2.0',
+    crs: 'epsg:4326',
+    point: `${lng},${lat}`,
+    format: 'json',
+    type: 'PARCEL',
+    key,
+    domain,
+  });
+
+  const res = await fetch(`${VWORLD_ENDPOINT}?${params}`);
+  if (!res.ok) throw new Error(`VWorld 지오코딩 실패 (HTTP ${res.status})`);
+  const json = await res.json();
+  const result = json.response?.result;
+
+  if (!result?.text) return { gu: '', dong: '' };
+
+  const text = result.text;
+  const structure = result.structure;
+
+  let gu = '';
+  let dong = '';
+
+  if (structure) {
+    gu = structure.level1 || '';
+    dong = structure.level2 || '';
+  } else {
+    const parts = text.split(' ');
+    if (parts.length >= 2) {
+      gu = parts[0];
+      dong = parts[1];
+    } else if (parts.length === 1) {
+      gu = parts[0];
+    }
+  }
+
+  return { gu, dong };
+}

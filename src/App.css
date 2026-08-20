@@ -377,6 +377,86 @@
   margin-left: 4px;
 }
 
+.level-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.level-modal {
+  background: white;
+  border-radius: 16px;
+  padding: 20px;
+  width: min(320px, calc(100vw - 40px));
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.level-modal__img {
+  width: 100%;
+  max-height: 240px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #f3f4f6;
+}
+
+.level-modal__label {
+  font-size: 15px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.level-modal__buttons {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.level-modal__btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 14px 0;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  color: white;
+  transition: transform 0.1s;
+}
+
+.level-modal__btn:active {
+  transform: scale(0.95);
+}
+
+.level-modal__btn--A {
+  background-color: #22c55e;
+}
+
+.level-modal__btn--B {
+  background-color: #f97316;
+}
+
+.level-modal__btn--Pole {
+  background-color: #a855f7;
+}
+
+.level-modal__desc {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.85;
+}
+
 @media (min-width: 900px) {
   .list-toggle,
   .backdrop,

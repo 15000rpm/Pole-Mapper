@@ -1,11 +1,13 @@
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
-import { join, basename } from 'path';
+import { join, basename, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const SOURCE_URL = 'https://saftyovhcable.kr/addMarker.html';
 const THUMB_BASE = 'https://saftyovhcable.kr/res/Thumb/';
-const UPLOAD_DIR = join(import.meta.dirname, 'uploads');
+const UPLOAD_DIR = join(__dirname, 'uploads');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

@@ -83,6 +83,21 @@ export async function insertPole(pole) {
   if (error) throw error;
 }
 
+export async function findDuplicatePole(lat, lng, timestamp) {
+  const tolerance = 0.0001;
+  const { data, error } = await supabase
+    .from('poles')
+    .select('id')
+    .gte('lat', lat - tolerance)
+    .lte('lat', lat + tolerance)
+    .gte('lng', lng - tolerance)
+    .lte('lng', lng + tolerance)
+    .eq('timestamp', timestamp)
+    .limit(1);
+  if (error) throw error;
+  return data?.length > 0;
+}
+
 export async function getPole(id) {
   const { data, error } = await supabase
     .from('poles')

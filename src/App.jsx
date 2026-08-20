@@ -14,7 +14,7 @@ import imageCompression from 'browser-image-compression';
 import exifr from 'exifr';
 import './App.css';
 
-const VWORLD_API_KEY = '2C00322C-5037-37EB-A547-7001C13840E9';
+const VWORLD_API_KEY = import.meta.env.VITE_VWORLD_API_KEY;
 const LEVEL_COLORS = { A: '#22c55e', B: '#f97316', Pole: '#a855f7' };
 const LEVEL_LABELS = { A: 'A', B: 'B', Pole: 'P' };
 
@@ -44,6 +44,8 @@ function App() {
   const [listOpen, setListOpen] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null);
   const folderInputRef = useRef(null);
+  const levelResolveRef = useRef(null);
+  const [levelModal, setLevelModal] = useState(null);
   const [levelFilter, setLevelFilter] = useState('all');
   const [guFilter, setGuFilter] = useState('용산구');
   const [dongFilter, setDongFilter] = useState('all');
@@ -66,8 +68,8 @@ function App() {
   const filteredPoles = useMemo(() => {
     return poles.filter(
       (p) => (levelFilter === 'all' || p.level === levelFilter) &&
-             (guFilter === 'all' || p.dong.includes(guFilter)) &&
-             (dongFilter === 'all' || p.dong.includes(dongFilter))
+             (guFilter === 'all' || p.gu === guFilter) &&
+             (dongFilter === 'all' || p.dong === dongFilter)
     );
   }, [poles, levelFilter, guFilter, dongFilter]);
 
@@ -84,11 +86,11 @@ function App() {
       if (f.get('poleId') !== 'current-location') source.removeFeature(f);
     });
     const idSet = new Set();
-    polesRef.current.forEach((pole) => {
+    poles.forEach((pole) => {
       if (idSet.has(pole.id)) return;
       if (levelFilter !== 'all' && pole.level !== levelFilter) return;
-      if (guFilter !== 'all' && !pole.dong.includes(guFilter)) return;
-      if (dongFilter !== 'all' && !pole.dong.includes(dongFilter)) return;
+      if (guFilter !== 'all' && pole.gu !== guFilter) return;
+      if (dongFilter !== 'all' && pole.dong !== dongFilter) return;
       idSet.add(pole.id);
       const feature = new Feature({
         geometry: new Point(fromLonLat([pole.lng, pole.lat])),
@@ -112,51 +114,20 @@ function App() {
       );
       source.addFeature(feature);
     });
-  }, [levelFilter, guFilter, dongFilter]);
+  }, [poles, levelFilter, guFilter, dongFilter]);
 
   useEffect(() => {
     syncMarkers();
   }, [syncMarkers]);
-
-  const addMarker = useCallback((lng, lat, id, level) => {
-    if (!markerLayerRef.current) return;
-
-    const isCurrentLocation = id === 'current-location';
-    const color = isCurrentLocation ? '#3b82f6' : (LEVEL_COLORS[level] || '#ef4444');
-    const label = isCurrentLocation ? '' : (LEVEL_LABELS[level] || '전신주');
-    const feature = new Feature({
-      geometry: new Point(fromLonLat([lng, lat])),
-      poleId: id,
-    });
-    feature.setStyle(
-      new Style({
-        image: new CircleStyle({
-          radius: isCurrentLocation ? 6 : 8,
-          fill: new Fill({ color }),
-          stroke: new Stroke({ color: 'white', width: 2 }),
-        }),
-        text: new Text({
-          text: label,
-          offsetY: -20,
-          font: 'bold 12px sans-serif',
-          fill: new Fill({ color: '#1e293b' }),
-          stroke: new Stroke({ color: 'white', width: 3 }),
-        }),
-      }),
-    );
-    markerLayerRef.current.getSource().addFeature(feature);
-    if (isCurrentLocation) {
-      currentLocationRef.current = feature;
-    }
-  }, []);
 
   const handleDelete = useCallback(async (id) => {
     try {
       const res = await fetch(`/api/poles/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`삭제 실패 (HTTP ${res.status})`);
       setPoles((prev) => {
-        polesRef.current = prev.filter((p) => p.id !== id);
-        return prev.filter((p) => p.id !== id);
+        const next = prev.filter((p) => p.id !== id);
+        polesRef.current = next;
+        return next;
       });
     } catch (err) {
       console.error('전신주 삭제 실패:', err);
@@ -181,6 +152,25 @@ function App() {
       zoom: 17,
       duration: 500,
     });
+  }, []);
+
+  const requestLevel = useCallback((file, gpsData) => {
+    const previewUrl = URL.createObjectURL(file);
+    return new Promise((resolve) => {
+      levelResolveRef.current = (level) => {
+        URL.revokeObjectURL(previewUrl);
+        resolve(level);
+      };
+      setLevelModal({ file, previewUrl, gpsData });
+    });
+  }, []);
+
+  const handleLevelSelect = useCallback((level) => {
+    setLevelModal(null);
+    if (levelResolveRef.current) {
+      levelResolveRef.current(level);
+      levelResolveRef.current = null;
+    }
   }, []);
 
   useEffect(() => {
@@ -234,7 +224,22 @@ function App() {
           popupOverlay.setPosition(evt.coordinate);
         });
 
-        addMarker(lng, lat, 'current-location');
+        const currentFeature = new Feature({
+          geometry: new Point(fromLonLat([lng, lat])),
+          poleId: 'current-location',
+        });
+        currentFeature.setStyle(
+          new Style({
+            image: new CircleStyle({
+              radius: 6,
+              fill: new Fill({ color: '#3b82f6' }),
+              stroke: new Stroke({ color: 'white', width: 2 }),
+            }),
+            text: new Text({ text: '' }),
+          }),
+        );
+        markerSource.addFeature(currentFeature);
+        currentLocationRef.current = currentFeature;
         Promise.allSettled([
           fetch('/api/poles').then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
           fetch('/api/all-dongs').then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
@@ -322,7 +327,7 @@ function App() {
       currentLocationRef.current = null;
       fallbackUsedRef.current = false;
     };
-  }, [addMarker]);
+  }, []);
 
   const handleCapture = async (e) => {
     const file = e.target.files?.[0];
@@ -334,9 +339,9 @@ function App() {
     try {
       let lat;
       let lng;
+      let exifTimestamp = null;
       let source = '';
 
-      // 1차: 사진 EXIF에서 GPS 추출 (ArrayBuffer로 읽어 Android 호환성 확보)
       try {
         const buffer = await file.arrayBuffer();
         console.log('파일 타입:', file.type, '크기:', file.size, 'buffer 크기:', buffer.byteLength);
@@ -347,14 +352,16 @@ function App() {
           lng = exifData.longitude;
           source = 'EXIF';
           lastPositionRef.current = { lat, lng };
-        } else {
-          console.log('EXIF에 GPS 데이터 없음');
+        }
+        if (exifData && exifData.DateTimeOriginal) {
+          exifTimestamp = new Date(exifData.DateTimeOriginal).toISOString();
+        } else if (exifData && exifData.DateTime) {
+          exifTimestamp = new Date(exifData.DateTime).toISOString();
         }
       } catch (err) {
         console.error('EXIF 읽기 실패:', err);
       }
 
-      // 2차: 브라우저 GPS (EXIF에 GPS가 없는 경우)
       if (lat === undefined && navigator.geolocation) {
         try {
           console.log('브라우저 GPS 요청 중...');
@@ -374,7 +381,6 @@ function App() {
         }
       }
 
-      // 3차: 마지막 알려진 위치 (watchPosition 또는 초기 위치)
       if (lat === undefined) {
         const last = lastPositionRef.current;
         if (last) {
@@ -388,27 +394,45 @@ function App() {
 
       setGpsInfo({ source, lat, lng });
 
+      const level = await requestLevel(file, { lat, lng });
+      if (!level) {
+        setProcessing(false);
+        e.target.value = '';
+        return;
+      }
+
       const compressed = await imageCompression(file, {
         maxSizeMB: 0.5,
         maxWidthOrHeight: 800,
         useWebWorker: true,
       });
 
-      const id = `pole-${Date.now()}`;
+      const id = `pole-${crypto.randomUUID()}`;
       const formData = new FormData();
+      formData.append('level', level);
       formData.append('photo', compressed, `${id}.jpg`);
       formData.append('id', id);
       formData.append('lat', lat);
       formData.append('lng', lng);
-      formData.append('timestamp', new Date().toISOString());
+      formData.append('timestamp', exifTimestamp || new Date().toISOString());
 
       const res = await fetch('/api/poles', { method: 'POST', body: formData });
-      if (!res.ok) throw new Error(`등록 실패 (HTTP ${res.status})`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        if (res.status === 409) {
+          alert('이미 등록된 전신주입니다 (GPS 좌표 + 촬영 시간 중복).');
+          setProcessing(false);
+          e.target.value = '';
+          return;
+        }
+        throw new Error(body.error || `등록 실패 (HTTP ${res.status})`);
+      }
       const pole = await res.json();
 
       setPoles((prev) => {
-        polesRef.current = [...prev, pole];
-        return [...prev, pole];
+        const next = [...prev, pole];
+        polesRef.current = next;
+        return next;
       });
     } catch (err) {
       console.error('전신주 등록 실패:', err);
@@ -436,6 +460,7 @@ function App() {
 
     let registered = 0;
     let skipped = 0;
+    let duplicated = 0;
 
     for (let i = 0; i < imageFiles.length; i++) {
       const file = imageFiles[i];
@@ -444,6 +469,7 @@ function App() {
       try {
         let lat;
         let lng;
+        let exifTimestamp = null;
 
         try {
           const buffer = await file.arrayBuffer();
@@ -452,6 +478,11 @@ function App() {
             lat = exifData.latitude;
             lng = exifData.longitude;
             lastPositionRef.current = { lat, lng };
+          }
+          if (exifData && exifData.DateTimeOriginal) {
+            exifTimestamp = new Date(exifData.DateTimeOriginal).toISOString();
+          } else if (exifData && exifData.DateTime) {
+            exifTimestamp = new Date(exifData.DateTime).toISOString();
           }
         } catch (err) {
           console.error('EXIF 읽기 실패:', file.name, err);
@@ -462,27 +493,41 @@ function App() {
           continue;
         }
 
+        const level = await requestLevel(file, { lat, lng });
+        if (!level) {
+          skipped++;
+          continue;
+        }
+
         const compressed = await imageCompression(file, {
           maxSizeMB: 0.5,
           maxWidthOrHeight: 800,
           useWebWorker: true,
         });
 
-        const id = `pole-${Date.now()}-${i}`;
+        const id = `pole-${crypto.randomUUID()}-${i}`;
         const formData = new FormData();
+        formData.append('level', level);
         formData.append('photo', compressed, `${id}.jpg`);
         formData.append('id', id);
         formData.append('lat', lat);
         formData.append('lng', lng);
-        formData.append('timestamp', new Date().toISOString());
+        formData.append('timestamp', exifTimestamp || new Date().toISOString());
 
         const res = await fetch('/api/poles', { method: 'POST', body: formData });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          if (res.status === 409) {
+            duplicated++;
+            continue;
+          }
+          throw new Error(`HTTP ${res.status}`);
+        }
         const pole = await res.json();
 
         setPoles((prev) => {
-          polesRef.current = [...prev, pole];
-          return [...prev, pole];
+          const next = [...prev, pole];
+          polesRef.current = next;
+          return next;
         });
         registered++;
       } catch (err) {
@@ -493,7 +538,10 @@ function App() {
 
     setUploadProgress(null);
     setProcessing(false);
-    alert(`등록 완료: ${registered}장${skipped > 0 ? ` / 건너뜀: ${skipped}장 (GPS 없음)` : ''}`);
+    const parts = [`등록: ${registered}장`];
+    if (duplicated > 0) parts.push(`중복: ${duplicated}장`);
+    if (skipped > 0) parts.push(`건너뜀: ${skipped}장`);
+    alert(parts.join(' / '));
     e.target.value = '';
   };
 
@@ -572,6 +620,41 @@ function App() {
         </div>
       )}
 
+      {levelModal && (
+        <div className="level-modal-backdrop" onClick={() => handleLevelSelect(null)}>
+          <div className="level-modal" onClick={(e) => e.stopPropagation()}>
+            <img src={levelModal.previewUrl} alt="전신주 사진" className="level-modal__img" />
+            <div className="level-modal__label">전신주 등급을 선택하세요</div>
+            <div className="level-modal__buttons">
+              <button
+                type="button"
+                className="level-modal__btn level-modal__btn--A"
+                onClick={() => handleLevelSelect('A')}
+              >
+                A
+                <span className="level-modal__desc">양호</span>
+              </button>
+              <button
+                type="button"
+                className="level-modal__btn level-modal__btn--B"
+                onClick={() => handleLevelSelect('B')}
+              >
+                B
+                <span className="level-modal__desc">불량</span>
+              </button>
+              <button
+                type="button"
+                className="level-modal__btn level-modal__btn--Pole"
+                onClick={() => handleLevelSelect('Pole')}
+              >
+                Pole
+                <span className="level-modal__desc">기준</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {poles.length > 0 && (
         <button
           type="button"
@@ -599,7 +682,9 @@ function App() {
         <div
           className="backdrop"
           onClick={() => setListOpen(false)}
-          onKeyDown={() => setListOpen(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') setListOpen(false);
+          }}
           role="button"
           tabIndex={0}
         />
@@ -660,7 +745,7 @@ function App() {
           >
             <option value="all">전체 구</option>
             {guList.map((gu) => {
-              const count = poles.filter((p) => p.dong.includes(gu)).length;
+              const count = poles.filter((p) => p.gu === gu).length;
               return (
                 <option key={gu} value={gu}>{gu} ({count}기)</option>
               );
@@ -674,7 +759,7 @@ function App() {
           >
             <option value="all">전체 동</option>
             {dongList.map((d) => {
-              const count = poles.filter((p) => p.dong.includes(d.dong)).length;
+              const count = poles.filter((p) => p.gu === guFilter && p.dong === d.dong).length;
               return (
                 <option key={d.dong} value={d.dong}>{d.dong} ({count}기)</option>
               );
