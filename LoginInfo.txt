@@ -1,3 +1,0 @@
-supabase
-
-DBPW : TnvkEngineSori1!

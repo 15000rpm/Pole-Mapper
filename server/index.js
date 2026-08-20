@@ -4,13 +4,19 @@ import cors from 'cors';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import * as db from './db.js';
-import { fetchGus, fetchDongs } from './vworld.js';
+import { fetchGus, fetchDongs, reverseGeocode } from './vworld.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
+const LEVEL_DIRS = ['A', 'B', 'Pole'];
+
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+for (const dir of LEVEL_DIRS) {
+  fs.mkdirSync(path.join(UPLOAD_DIR, dir), { recursive: true });
+}
 
 const PORT = Number(process.env.PORT || 4000);
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -22,7 +28,12 @@ app.use('/uploads', express.static(UPLOAD_DIR));
 
 const upload = multer({
   storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+    destination: (req, _file, cb) => {
+      const level = req.body?.level || 'uncategorized';
+      const dir = path.join(UPLOAD_DIR, level);
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
     filename: (req, file, cb) => {
       const id = req.body?.id || `pole-${Date.now()}`;
       const ext = path.extname(file.originalname) || '.jpg';
@@ -70,19 +81,40 @@ app.get('/api/poles', async (req, res) => {
 });
 
 app.post('/api/poles', upload.single('photo'), async (req, res) => {
-  const { id, lat, lng, gu = '', dong = '', timestamp, level = '' } = req.body ?? {};
+  const { id, lat, lng, timestamp, level = '' } = req.body ?? {};
+  let { gu = '', dong = '' } = req.body ?? {};
   if (lat === undefined || lng === undefined || !timestamp) {
     return res.status(400).json({ error: 'lat, lng, timestamp는 필수입니다.' });
   }
+  const numLat = Number(lat);
+  const numLng = Number(lng);
+  try {
+    if (await db.findDuplicatePole(numLat, numLng, timestamp)) {
+      if (req.file) fs.rm(req.file.path, () => {});
+      return res.status(409).json({ error: 'duplicate', message: '이미 등록된 전신주입니다.' });
+    }
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+  if (!gu || !dong) {
+    try {
+      const geo = await reverseGeocode(numLat, numLng);
+      if (!gu) gu = geo.gu;
+      if (!dong) dong = geo.dong;
+    } catch (e) {
+      console.warn('지오코딩 실패:', e.message);
+    }
+  }
+  const photoPath = req.file ? `${level || 'uncategorized'}/${req.file.filename}` : null;
   const pole = {
-    id: id || `pole-${Date.now()}`,
-    lat: Number(lat),
-    lng: Number(lng),
+    id: id || `pole-${crypto.randomUUID()}`,
+    lat: numLat,
+    lng: numLng,
     gu,
     dong,
     timestamp,
     level,
-    photo_path: req.file ? req.file.filename : null,
+    photo_path: photoPath,
   };
   try {
     await db.insertPole(pole);
@@ -118,7 +150,7 @@ app.delete('/api/poles/:id', async (req, res) => {
   const existing = await db.getPole(req.params.id);
   if (!existing) return res.status(404).json({ error: '전신주를 찾을 수 없습니다.' });
   if (existing.photo_path) {
-    fs.rm(path.join(UPLOAD_DIR, path.basename(existing.photo_path)), () => {});
+    fs.rm(path.join(UPLOAD_DIR, existing.photo_path), () => {});
   }
   try {
     await db.deletePole(existing.id);
@@ -128,6 +160,10 @@ app.delete('/api/poles/:id', async (req, res) => {
   res.json({ removed: true });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Pole Mapper API server: http://localhost:${PORT}`);
+});
+server.on('error', (err) => {
+  console.error('서버 시작 실패:', err);
+  process.exit(1);
 });
