@@ -1,0 +1,34 @@
+{
+  "name": "pole-mapper",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:client\" \"npm:dev:server\"",
+    "dev:client": "vite",
+    "dev:server": "node --watch server/index.js",
+    "build": "vite build",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
+    "browser-image-compression": "^2.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "exifr": "^7.1.3",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "ol": "^10.9.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "concurrently": "^9.2.0",
+    "oxlint": "^1.71.0",
+    "vite": "^8.1.1"
+  }
+}
