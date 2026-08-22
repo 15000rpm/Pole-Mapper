@@ -919,7 +919,7 @@ function App() {
           onClick={() => setListOpen((o) => !o)}
           className="list-toggle"
         >
-          📋 {filteredPoles.length}기
+          📋 {poles.length}기
         </button>
       )}
 
@@ -1034,6 +1034,7 @@ function App() {
               {f.label}
             </button>
           ))}
+          <span className="pole-list__filter-count">{filteredPoles.length}기</span>
         </div>
 
         <div className="pole-list__area-filter">
