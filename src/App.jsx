@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Map from 'ol/Map';
+import OLMap from 'ol/Map';
 import View from 'ol/View';
 import Overlay from 'ol/Overlay';
 import TileLayer from 'ol/layer/Tile';
@@ -17,6 +17,9 @@ import './App.css';
 const VWORLD_API_KEY = import.meta.env.VITE_VWORLD_API_KEY;
 const LEVEL_COLORS = { A: '#22c55e', B: '#f97316', Pole: '#a855f7' };
 const LEVEL_LABELS = { A: 'A', B: 'B', Pole: 'P' };
+const LEVEL_IGNORE = 'IGNORE';
+const LEVEL_CANCEL = 'CANCEL';
+const LEVEL_KEYS = { 1: 'A', 2: 'B', 3: 'Pole', 4: LEVEL_IGNORE };
 
 function createTileSource(layer) {
   return new XYZ({
@@ -46,6 +49,10 @@ function App() {
   const folderInputRef = useRef(null);
   const levelResolveRef = useRef(null);
   const [levelModal, setLevelModal] = useState(null);
+  const [modalAddress, setModalAddress] = useState(undefined);
+  const [modalBusy, setModalBusy] = useState(false);
+  const previewUrlRef = useRef(null);
+  const reverseGeocodeCacheRef = useRef(new Map());
   const [levelFilter, setLevelFilter] = useState('all');
   const [guFilter, setGuFilter] = useState('용산구');
   const [dongFilter, setDongFilter] = useState('all');
@@ -56,6 +63,7 @@ function App() {
   const popupRef = useRef(null);
   const popupOverlayRef = useRef(null);
   const [popupPole, setPopupPole] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const guList = useMemo(() => {
     const set = new Set(allDongs.map((d) => d.gu_name));
@@ -179,6 +187,23 @@ function App() {
     }
   }, []);
 
+  const refreshPoles = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const res = await fetch('/api/poles');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const next = await res.json();
+      polesRef.current = next;
+      setPoles(next);
+    } catch (err) {
+      console.error('전신주 목록 갱신 실패:', err);
+      alert('목록 갱신에 실패했습니다.');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing]);
+
   const flyTo = useCallback((lng, lat) => {
     if (!mapRef.current) return;
     mapRef.current.getView().animate({
@@ -198,24 +223,104 @@ function App() {
     });
   }, []);
 
-  const requestLevel = useCallback((file, gpsData) => {
-    const previewUrl = URL.createObjectURL(file);
-    return new Promise((resolve) => {
-      levelResolveRef.current = (level) => {
-        URL.revokeObjectURL(previewUrl);
-        resolve(level);
-      };
-      setLevelModal({ file, previewUrl, gpsData });
-    });
-  }, []);
-
-  const handleLevelSelect = useCallback((level) => {
-    setLevelModal(null);
-    if (levelResolveRef.current) {
-      levelResolveRef.current(level);
-      levelResolveRef.current = null;
+  const lookupAddress = useCallback(async (lat, lng) => {
+    if (!(reverseGeocodeCacheRef.current instanceof Map)) {
+      reverseGeocodeCacheRef.current = new Map();
+    }
+    const key = `${Number(lat).toFixed(5)},${Number(lng).toFixed(5)}`;
+    if (reverseGeocodeCacheRef.current.has(key)) {
+      return reverseGeocodeCacheRef.current.get(key);
+    }
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(`/api/reverse-geocode?lat=${lat}&lng=${lng}`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const geo = await res.json();
+      const label = [geo.gu, geo.dong].filter(Boolean).join(' ') || null;
+      reverseGeocodeCacheRef.current.set(key, label);
+      return label;
+    } catch (err) {
+      console.error('역지오코딩 실패:', err);
+      return null;
     }
   }, []);
+
+  const claimPreviewUrl = useCallback((file, preloadedUrl) => {
+    const url = preloadedUrl || URL.createObjectURL(file);
+    if (previewUrlRef.current && previewUrlRef.current !== url) {
+      URL.revokeObjectURL(previewUrlRef.current);
+    }
+    previewUrlRef.current = url;
+    return url;
+  }, []);
+
+  const closeLevelModal = useCallback(() => {
+    levelResolveRef.current = null;
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+    setLevelModal(null);
+    setModalAddress(undefined);
+    setModalBusy(false);
+  }, []);
+
+  const requestLevel = useCallback((info) => {
+    const previewUrl = claimPreviewUrl(info.file, info.previewUrl);
+    setModalBusy(false);
+    setLevelModal({
+      file: info.file,
+      previewUrl,
+      lat: info.lat,
+      lng: info.lng,
+      timestamp: info.timestamp,
+    });
+    return new Promise((resolve) => {
+      levelResolveRef.current = resolve;
+    });
+  }, [claimPreviewUrl]);
+
+  const handleLevelSelect = useCallback(
+    (level) => {
+      if (modalBusy || !levelResolveRef.current) return;
+      levelResolveRef.current(level);
+      levelResolveRef.current = null;
+      setModalBusy(true);
+    },
+    [modalBusy],
+  );
+
+  useEffect(() => {
+    if (!levelModal) return;
+    const onKeyDown = (e) => {
+      const level = LEVEL_KEYS[e.key];
+      if (level) {
+        e.preventDefault();
+        handleLevelSelect(level);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [levelModal, handleLevelSelect]);
+
+  useEffect(() => {
+    if (!levelModal) {
+      setModalAddress(undefined);
+      return;
+    }
+    let cancelled = false;
+    setModalAddress(undefined);
+    lookupAddress(levelModal.lat, levelModal.lng).then((address) => {
+      if (!cancelled) setModalAddress(address);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [levelModal, lookupAddress]);
 
   const refreshGps = useCallback(() => {
     return new Promise((resolve) => {
@@ -254,7 +359,7 @@ function App() {
         const markerLayer = new VectorLayer({ source: markerSource });
         markerLayerRef.current = markerLayer;
 
-        const map = new Map({
+        const map = new OLMap({
           target: mapContainerRef.current,
           layers: [
             new TileLayer({ source: createTileSource('Base') }),
@@ -378,6 +483,10 @@ function App() {
       markerLayerRef.current = null;
       currentLocationRef.current = null;
       fallbackUsedRef.current = false;
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = null;
+      }
     };
   }, []);
 
@@ -427,8 +536,14 @@ function App() {
 
       setGpsInfo({ source, lat, lng });
 
-      const level = await requestLevel(file, { lat, lng });
-      if (!level) {
+      const level = await requestLevel({
+        file,
+        lat,
+        lng,
+        timestamp: exifTimestamp || new Date().toISOString(),
+      });
+      closeLevelModal();
+      if (!level || level === LEVEL_IGNORE || level === LEVEL_CANCEL) {
         setProcessing(false);
         e.target.value = '';
         return;
@@ -488,57 +603,102 @@ function App() {
       return;
     }
 
+    const preparePhoto = async (file) => {
+      let lat;
+      let lng;
+      let exifTimestamp = null;
+      try {
+        const buffer = await file.arrayBuffer();
+        const exifData = await exifr.parse(buffer);
+        if (exifData && exifData.latitude && exifData.longitude) {
+          lat = exifData.latitude;
+          lng = exifData.longitude;
+        }
+        if (exifData && exifData.DateTimeOriginal) {
+          exifTimestamp = new Date(exifData.DateTimeOriginal).toISOString();
+        } else if (exifData && exifData.DateTime) {
+          exifTimestamp = new Date(exifData.DateTime).toISOString();
+        }
+      } catch (err) {
+        console.error('EXIF 읽기 실패:', file.name, err);
+      }
+      const previewUrl = URL.createObjectURL(file);
+      try {
+        await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error('preview decode failed'));
+          img.src = previewUrl;
+        });
+      } catch {
+        // 디코딩 미지원 형식(예: HEIC)은 모달에서 브라우저가 다시 시도한다.
+      }
+      return {
+        file,
+        lat,
+        lng,
+        exifTimestamp,
+        timestamp: exifTimestamp || new Date().toISOString(),
+        previewUrl,
+      };
+    };
+
     setProcessing(true);
     setUploadProgress({ current: 0, total: imageFiles.length });
 
     let registered = 0;
+    let ignoredCount = 0;
     let skipped = 0;
     let duplicated = 0;
+    let cancelledRemaining = 0;
+
+    let pendingPrepPromise = preparePhoto(imageFiles[0]);
 
     for (let i = 0; i < imageFiles.length; i++) {
-      const file = imageFiles[i];
       setUploadProgress({ current: i + 1, total: imageFiles.length });
 
+      let prep = null;
       try {
-        let lat;
-        let lng;
-        let exifTimestamp = null;
+        prep = await pendingPrepPromise;
+      } catch (err) {
+        console.error('사진 준비 실패:', imageFiles[i].name, err);
+      }
+      pendingPrepPromise =
+        i + 1 < imageFiles.length ? preparePhoto(imageFiles[i + 1]) : null;
 
-        try {
-          const buffer = await file.arrayBuffer();
-          const exifData = await exifr.parse(buffer);
-          if (exifData && exifData.latitude && exifData.longitude) {
-            lat = exifData.latitude;
-            lng = exifData.longitude;
-            lastPositionRef.current = { lat, lng };
-          }
-          if (exifData && exifData.DateTimeOriginal) {
-            exifTimestamp = new Date(exifData.DateTimeOriginal).toISOString();
-          } else if (exifData && exifData.DateTime) {
-            exifTimestamp = new Date(exifData.DateTime).toISOString();
-          }
-        } catch (err) {
-          console.error('EXIF 읽기 실패:', file.name, err);
-        }
-
-        if (lat === undefined) {
-          const last = lastPositionRef.current;
-          if (last) {
-            lat = last.lat;
-            lng = last.lng;
-          } else {
-            skipped++;
-            continue;
-          }
-        }
-
-        const level = await requestLevel(file, { lat, lng });
-        if (!level) {
+      if (!prep) {
+        skipped++;
+        continue;
+      }
+      if (prep.lat !== undefined) {
+        lastPositionRef.current = { lat: prep.lat, lng: prep.lng };
+      } else {
+        const last = lastPositionRef.current;
+        if (!last) {
+          URL.revokeObjectURL(prep.previewUrl);
           skipped++;
           continue;
         }
+        prep.lat = last.lat;
+        prep.lng = last.lng;
+      }
 
-        const compressed = await imageCompression(file, {
+      const level = await requestLevel(prep);
+      if (!level) {
+        skipped++;
+        continue;
+      }
+      if (level === LEVEL_IGNORE) {
+        ignoredCount++;
+        continue;
+      }
+      if (level === LEVEL_CANCEL) {
+        cancelledRemaining = imageFiles.length - i;
+        break;
+      }
+
+      try {
+        const compressed = await imageCompression(prep.file, {
           maxSizeMB: 0.5,
           maxWidthOrHeight: 800,
           useWebWorker: true,
@@ -549,9 +709,9 @@ function App() {
         formData.append('level', level);
         formData.append('photo', compressed, `${id}.jpg`);
         formData.append('id', id);
-        formData.append('lat', lat);
-        formData.append('lng', lng);
-        formData.append('timestamp', exifTimestamp || new Date().toISOString());
+        formData.append('lat', prep.lat);
+        formData.append('lng', prep.lng);
+        formData.append('timestamp', prep.timestamp);
 
         const res = await fetch('/api/poles', { method: 'POST', body: formData });
         if (!res.ok) {
@@ -570,16 +730,30 @@ function App() {
         });
         registered++;
       } catch (err) {
-        console.error('전신주 등록 실패:', file.name, err);
+        console.error('전신주 등록 실패:', prep.file.name, err);
         skipped++;
       }
     }
 
+    if (pendingPrepPromise) {
+      try {
+        const leftover = await pendingPrepPromise;
+        if (leftover?.previewUrl && leftover.previewUrl !== previewUrlRef.current) {
+          URL.revokeObjectURL(leftover.previewUrl);
+        }
+      } catch {
+        // 준비 자체가 실패한 경우 정리할 자원이 없다.
+      }
+    }
+    closeLevelModal();
+
     setUploadProgress(null);
     setProcessing(false);
     const parts = [`등록: ${registered}장`];
+    if (ignoredCount > 0) parts.push(`무시: ${ignoredCount}장`);
     if (duplicated > 0) parts.push(`중복: ${duplicated}장`);
     if (skipped > 0) parts.push(`건너뜀: ${skipped}장`);
+    if (cancelledRemaining > 0) parts.push(`취소: ${cancelledRemaining}장`);
     alert(parts.join(' / '));
     e.target.value = '';
   };
@@ -665,33 +839,74 @@ function App() {
 
       {levelModal && (
         <div className="level-modal-backdrop" onClick={() => handleLevelSelect(null)}>
-          <div className="level-modal" onClick={(e) => e.stopPropagation()}>
+          <div
+            className={`level-modal${modalBusy ? ' level-modal--busy' : ''}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="level-modal__close"
+              aria-label="등록 작업 취소"
+              title="작업 취소"
+              disabled={modalBusy}
+              onClick={() => handleLevelSelect(LEVEL_CANCEL)}
+            >
+              ✕
+            </button>
             <img src={levelModal.previewUrl} alt="전신주 사진" className="level-modal__img" />
-            <div className="level-modal__label">전신주 등급을 선택하세요</div>
+            <div className="level-modal__meta">
+              <div className="level-modal__meta-row">
+                📍 {modalAddress === undefined ? '주소 조회 중...' : modalAddress || '주소를 찾을 수 없음'}
+              </div>
+              {levelModal.timestamp && (
+                <div className="level-modal__meta-row">
+                  🕒 {new Date(levelModal.timestamp).toLocaleString('ko-KR')}
+                </div>
+              )}
+            </div>
+            <div className="level-modal__label">
+              {modalBusy ? '처리 중...' : '전신주 등급을 선택하세요'}
+            </div>
             <div className="level-modal__buttons">
               <button
                 type="button"
                 className="level-modal__btn level-modal__btn--A"
+                disabled={modalBusy}
                 onClick={() => handleLevelSelect('A')}
               >
+                <span className="level-modal__key">1</span>
                 A
                 <span className="level-modal__desc">양호</span>
               </button>
               <button
                 type="button"
                 className="level-modal__btn level-modal__btn--B"
+                disabled={modalBusy}
                 onClick={() => handleLevelSelect('B')}
               >
+                <span className="level-modal__key">2</span>
                 B
                 <span className="level-modal__desc">불량</span>
               </button>
               <button
                 type="button"
                 className="level-modal__btn level-modal__btn--Pole"
+                disabled={modalBusy}
                 onClick={() => handleLevelSelect('Pole')}
               >
+                <span className="level-modal__key">3</span>
                 Pole
                 <span className="level-modal__desc">기준</span>
+              </button>
+              <button
+                type="button"
+                className="level-modal__btn level-modal__btn--Ignore"
+                disabled={modalBusy}
+                onClick={() => handleLevelSelect(LEVEL_IGNORE)}
+              >
+                <span className="level-modal__key">4</span>
+                무시
+                <span className="level-modal__desc">등록 안 함</span>
               </button>
             </div>
           </div>
@@ -743,6 +958,14 @@ function App() {
             전신주 목록 ({filteredPoles.length}기)
           </span>
           <div className="pole-list__header-actions">
+            <button
+              type="button"
+              className={`pole-list__refresh${refreshing ? ' pole-list__refresh--loading' : ''}`}
+              onClick={refreshPoles}
+              disabled={refreshing}
+            >
+              <span className="pole-list__refresh-icon">🔄</span> 리프레시
+            </button>
             <button
               type="button"
               className="pole-list__upload"

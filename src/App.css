@@ -179,6 +179,17 @@
 .pole-list__title {
   font-weight: bold;
   font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.pole-list__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .pole-list__close {
@@ -188,12 +199,6 @@
   cursor: pointer;
   padding: 4px 8px;
   color: #6b7280;
-}
-
-.pole-list__header-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
 .pole-list__upload {
@@ -210,6 +215,44 @@
 
 .pole-list__upload:hover {
   background-color: #f3f4f6;
+}
+
+.pole-list__refresh {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #374151;
+  white-space: nowrap;
+}
+
+.pole-list__refresh:hover:not(:disabled) {
+  background-color: #f3f4f6;
+}
+
+.pole-list__refresh:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.pole-list__refresh-icon {
+  display: inline-block;
+}
+
+@keyframes pole-refresh-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pole-list__refresh--loading .pole-list__refresh-icon {
+  animation: pole-refresh-spin 0.8s linear infinite;
 }
 
 .pole-list__scroll {
@@ -472,6 +515,7 @@
 }
 
 .level-modal {
+  position: relative;
   background: white;
   border-radius: 16px;
   padding: 20px;
@@ -483,12 +527,60 @@
   gap: 16px;
 }
 
+.level-modal__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background-color: rgba(0, 0, 0, 0.45);
+  color: white;
+  font-size: 13px;
+  line-height: 28px;
+  text-align: center;
+  cursor: pointer;
+  padding: 0;
+  z-index: 1;
+}
+
+.level-modal__close:hover {
+  background-color: rgba(0, 0, 0, 0.7);
+}
+
+.level-modal--busy .level-modal__label {
+  color: #3b82f6;
+}
+
+.level-modal--busy .level-modal__buttons,
+.level-modal--busy .level-modal__close {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .level-modal__img {
   width: 100%;
   max-height: 240px;
   object-fit: contain;
   border-radius: 8px;
   background: #f3f4f6;
+}
+
+.level-modal__meta {
+  width: 100%;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.level-modal__meta-row {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .level-modal__label {
@@ -498,21 +590,21 @@
 }
 
 .level-modal__buttons {
-  display: flex;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
   width: 100%;
 }
 
 .level-modal__btn {
-  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 14px 0;
+  padding: 12px 0;
   border-radius: 10px;
   border: 2px solid transparent;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
   cursor: pointer;
   color: white;
@@ -533,6 +625,24 @@
 
 .level-modal__btn--Pole {
   background-color: #a855f7;
+}
+
+.level-modal__btn--Ignore {
+  background-color: #64748b;
+}
+
+.level-modal__key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background-color: rgba(255, 255, 255, 0.25);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .level-modal__desc {

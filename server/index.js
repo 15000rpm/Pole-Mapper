@@ -71,6 +71,19 @@ app.get('/api/dongs', async (req, res) => {
   }
 });
 
+app.get('/api/reverse-geocode', async (req, res) => {
+  const numLat = Number(req.query.lat);
+  const numLng = Number(req.query.lng);
+  if (!Number.isFinite(numLat) || !Number.isFinite(numLng)) {
+    return res.status(400).json({ error: 'lat, lng 파라미터가 필요합니다.' });
+  }
+  try {
+    res.json(await reverseGeocode(numLat, numLng));
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
 app.get('/api/poles', async (req, res) => {
   const { gu = '', dong = '', start = '', end = '' } = req.query;
   try {

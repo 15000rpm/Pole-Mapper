@@ -1,4 +1,5 @@
 const VWORLD_ENDPOINT = 'https://api.vworld.kr/req/data';
+const VWORLD_ADDRESS_ENDPOINT = 'https://api.vworld.kr/req/address';
 
 function credentials() {
   return {
@@ -80,31 +81,18 @@ export async function reverseGeocode(lat, lng) {
     domain,
   });
 
-  const res = await fetch(`${VWORLD_ENDPOINT}?${params}`);
+  const res = await fetch(`${VWORLD_ADDRESS_ENDPOINT}?${params}`);
   if (!res.ok) throw new Error(`VWorld 지오코딩 실패 (HTTP ${res.status})`);
   const json = await res.json();
-  const result = json.response?.result;
+  const response = json.response;
+  if (response?.status !== 'OK') return { gu: '', dong: '' };
 
-  if (!result?.text) return { gu: '', dong: '' };
+  const first = Array.isArray(response.result) ? response.result[0] : response.result;
+  const structure = first?.structure;
+  if (!structure) return { gu: '', dong: '' };
 
-  const text = result.text;
-  const structure = result.structure;
-
-  let gu = '';
-  let dong = '';
-
-  if (structure) {
-    gu = structure.level1 || '';
-    dong = structure.level2 || '';
-  } else {
-    const parts = text.split(' ');
-    if (parts.length >= 2) {
-      gu = parts[0];
-      dong = parts[1];
-    } else if (parts.length === 1) {
-      gu = parts[0];
-    }
-  }
-
-  return { gu, dong };
+  return {
+    gu: structure.level2 || '',
+    dong: structure.level3 || structure.level4L || '',
+  };
 }
