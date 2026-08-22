@@ -49,6 +49,8 @@ function App() {
   const [levelFilter, setLevelFilter] = useState('all');
   const [guFilter, setGuFilter] = useState('용산구');
   const [dongFilter, setDongFilter] = useState('all');
+  const [timeFilterEnabled, setTimeFilterEnabled] = useState(false);
+  const [timeFilterWeek, setTimeFilterWeek] = useState(0);
   const polesRef = useRef([]);
   const [allDongs, setAllDongs] = useState([]);
   const popupRef = useRef(null);
@@ -65,13 +67,55 @@ function App() {
     return allDongs.filter((d) => d.gu_name === guFilter);
   }, [allDongs, guFilter]);
 
+  const { minWeek, maxWeek } = useMemo(() => {
+    if (poles.length === 0) return { minWeek: 0, maxWeek: 0 };
+    let minTs = Infinity;
+    let maxTs = -Infinity;
+    for (const p of poles) {
+      const t = Date.parse(p.timestamp);
+      if (!Number.isNaN(t)) {
+        if (t < minTs) minTs = t;
+        if (t > maxTs) maxTs = t;
+      }
+    }
+    if (!Number.isFinite(minTs)) return { minWeek: 0, maxWeek: 0 };
+    const toWeek = (ts) => Math.floor((ts - minTs) / (7 * 86400000));
+    return { minWeek: 0, maxWeek: Math.max(toWeek(maxTs), 0) };
+  }, [poles]);
+
+  const timeFilterCutoff = useMemo(() => {
+    if (!timeFilterEnabled || poles.length === 0) return null;
+    let minTs = Infinity;
+    for (const p of poles) {
+      const t = Date.parse(p.timestamp);
+      if (!Number.isNaN(t) && t < minTs) minTs = t;
+    }
+    if (!Number.isFinite(minTs)) return null;
+    const cutoffTs = minTs + (timeFilterWeek + 1) * 7 * 86400000;
+    return new Date(cutoffTs).toISOString();
+  }, [timeFilterEnabled, timeFilterWeek, poles]);
+
+  const timeFilterLabel = useMemo(() => {
+    if (!timeFilterEnabled || poles.length === 0) return '';
+    let minTs = Infinity;
+    for (const p of poles) {
+      const t = Date.parse(p.timestamp);
+      if (!Number.isNaN(t) && t < minTs) minTs = t;
+    }
+    if (!Number.isFinite(minTs)) return '';
+    const cutoffTs = minTs + (timeFilterWeek + 1) * 7 * 86400000;
+    const d = new Date(cutoffTs);
+    return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${Math.ceil(d.getDate() / 7)}주차`;
+  }, [timeFilterEnabled, timeFilterWeek, poles]);
+
   const filteredPoles = useMemo(() => {
     return poles.filter(
       (p) => (levelFilter === 'all' || p.level === levelFilter) &&
              (guFilter === 'all' || p.gu === guFilter) &&
-             (dongFilter === 'all' || p.dong === dongFilter)
+             (dongFilter === 'all' || p.dong === dongFilter) &&
+             (!timeFilterEnabled || p.timestamp <= timeFilterCutoff)
     );
-  }, [poles, levelFilter, guFilter, dongFilter]);
+  }, [poles, levelFilter, guFilter, dongFilter, timeFilterEnabled, timeFilterCutoff]);
 
   useEffect(() => {
     if (!gpsInfo) return;
@@ -173,6 +217,30 @@ function App() {
     }
   }, []);
 
+  const refreshGps = useCallback(() => {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        resolve(lastPositionRef.current);
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const position = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          lastPositionRef.current = position;
+          resolve(position);
+        },
+        () => resolve(lastPositionRef.current),
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 },
+      );
+    });
+  }, []);
+
+  const handleCameraClick = () => {
+    if (processing) return;
+    refreshGps();
+    document.getElementById('camera-input').click();
+  };
+
   useEffect(() => {
     if (mapRef.current) return;
 
@@ -267,27 +335,11 @@ function App() {
       }
     };
 
-    const handleSuccess = (position) => {
-      if (aborted) return;
-      const { latitude: lat, longitude: lng } = position.coords;
-      lastPositionRef.current = { lat, lng };
-      initMap(lng, lat);
-    };
-
-    const handleError = (err) => {
-      if (aborted) return;
-      console.error('getCurrentPosition 실패:', err?.code, err?.message);
-      const fallback = { lat: 37.5665, lng: 126.978 };
-      lastPositionRef.current = fallback;
-      fallbackUsedRef.current = true;
-      initMap(fallback.lng, fallback.lat);
-    };
+    const fallback = { lat: 37.5665, lng: 126.978 };
+    lastPositionRef.current = fallback;
+    initMap(fallback.lng, fallback.lat);
 
     if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(handleSuccess, handleError, {
-        enableHighAccuracy: true,
-      });
-
       watchIdRef.current = navigator.geolocation.watchPosition(
         (position) => {
           const { latitude: lat, longitude: lng } = position.coords;
@@ -307,10 +359,10 @@ function App() {
         (err) => {
           console.error('watchPosition 실패:', err.code, err.message);
         },
-        { enableHighAccuracy: true, maximumAge: 10000 },
+        { enableHighAccuracy: true, maximumAge: 0 },
       );
     } else {
-      handleError();
+      fallbackUsedRef.current = true;
     }
 
     return () => {
@@ -362,31 +414,12 @@ function App() {
         console.error('EXIF 읽기 실패:', err);
       }
 
-      if (lat === undefined && navigator.geolocation) {
-        try {
-          console.log('브라우저 GPS 요청 중...');
-          const pos = await new Promise((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, {
-              enableHighAccuracy: true,
-              timeout: 15000,
-              maximumAge: 30000,
-            });
-          });
-          lat = pos.coords.latitude;
-          lng = pos.coords.longitude;
-          source = '브라우저 GPS';
-          lastPositionRef.current = { lat, lng };
-        } catch (err) {
-          console.error('브라우저 GPS 실패:', err);
-        }
-      }
-
       if (lat === undefined) {
         const last = lastPositionRef.current;
         if (last) {
           lat = last.lat;
           lng = last.lng;
-          source = watchIdRef.current != null ? '실시간 GPS' : '폴백 (초기 위치)';
+          source = '실시간 GPS';
         } else {
           throw new Error('No GPS available');
         }
@@ -489,8 +522,14 @@ function App() {
         }
 
         if (lat === undefined) {
-          skipped++;
-          continue;
+          const last = lastPositionRef.current;
+          if (last) {
+            lat = last.lat;
+            lng = last.lng;
+          } else {
+            skipped++;
+            continue;
+          }
         }
 
         const level = await requestLevel(file, { lat, lng });
@@ -602,9 +641,13 @@ function App() {
           ref={folderInputRef}
           onChange={handleFolderUpload}
         />
-        <label htmlFor="camera-input" className="capture-button">
+        <button
+          type="button"
+          className="capture-button"
+          onClick={handleCameraClick}
+        >
           📷 등록
-        </label>
+        </button>
         <button
           type="button"
           className="locate-btn"
@@ -674,7 +717,9 @@ function App() {
           }
         >
           <div className="gps-info__title">📍 {gpsInfo.source}</div>
-          <div>{gpsInfo.lat.toFixed(5)}, {gpsInfo.lng.toFixed(5)}</div>
+          {gpsInfo.lat != null && (
+            <div>{gpsInfo.lat.toFixed(5)}, {gpsInfo.lng.toFixed(5)}</div>
+          )}
         </div>
       )}
 
@@ -714,6 +759,40 @@ function App() {
             </button>
           </div>
         </div>
+
+        {poles.length > 0 && (
+          <div className="pole-list__time-filter">
+            <div className="time-filter__header">
+              <span className="time-filter__label">⏱ 촬영시간</span>
+              <button
+                type="button"
+                className={`time-filter__toggle ${timeFilterEnabled ? 'time-filter__toggle--on' : ''}`}
+                onClick={() => {
+                  setTimeFilterEnabled((v) => !v);
+                  if (!timeFilterEnabled) setTimeFilterWeek(maxWeek);
+                }}
+              >
+                {timeFilterEnabled ? 'ON' : 'OFF'}
+              </button>
+            </div>
+            {timeFilterEnabled && (
+              <>
+                <input
+                  type="range"
+                  className="time-filter__slider"
+                  min={minWeek}
+                  max={maxWeek}
+                  value={timeFilterWeek}
+                  onChange={(e) => setTimeFilterWeek(Number(e.target.value))}
+                />
+                <div className="time-filter__info">
+                  <span>{timeFilterLabel}</span>
+                  <span className="time-filter__count">{filteredPoles.length}기</span>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         <div className="pole-list__filters">
           {[
