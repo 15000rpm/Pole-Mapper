@@ -955,7 +955,7 @@ function App() {
       >
         <div className="pole-list__header">
           <span className="pole-list__title">
-            전신주 목록 ({filteredPoles.length}기)
+            전신주 목록 ({poles.length}기)
           </span>
           <div className="pole-list__header-actions">
             <button
