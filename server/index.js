@@ -141,19 +141,33 @@ app.post('/api/poles', upload.single('photo'), async (req, res) => {
   });
 });
 
+let allDongsRefreshPromise = null;
+
 app.get('/api/all-dongs', async (_req, res) => {
   try {
+    if (allDongsRefreshPromise) {
+      res.json(await allDongsRefreshPromise);
+      return;
+    }
     if (!(await db.isGusFresh(CACHE_TTL_MS))) {
       await db.replaceGus(await fetchGus());
     }
     const gus = await db.getGus();
+    const stale = [];
     for (const gu of gus) {
-      if (!(await db.isDongsFresh(gu.name, CACHE_TTL_MS))) {
-        await db.replaceDongs(gu.name, await fetchDongs(gu.code));
-      }
+      if (!(await db.isDongsFresh(gu.name, CACHE_TTL_MS))) stale.push(gu);
     }
-    const allDongs = await db.getAllDongs();
-    res.json(allDongs);
+    if (stale.length === 0) {
+      res.json(await db.getAllDongs());
+      return;
+    }
+    allDongsRefreshPromise = (async () => {
+      await Promise.all(stale.map((gu) => fetchDongs(gu.code).then((d) => db.replaceDongs(gu.name, d))));
+      return db.getAllDongs();
+    })().finally(() => {
+      allDongsRefreshPromise = null;
+    });
+    res.json(await allDongsRefreshPromise);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
