@@ -143,6 +143,7 @@ function App() {
       if (levelFilter !== 'all' && pole.level !== levelFilter) return;
       if (guFilter !== 'all' && pole.gu !== guFilter) return;
       if (dongFilter !== 'all' && pole.dong !== dongFilter) return;
+      if (timeFilterEnabled && pole.timestamp > timeFilterCutoff) return;
       idSet.add(pole.id);
       const feature = new Feature({
         geometry: new Point(fromLonLat([pole.lng, pole.lat])),
@@ -166,7 +167,7 @@ function App() {
       );
       source.addFeature(feature);
     });
-  }, [poles, levelFilter, guFilter, dongFilter]);
+  }, [poles, levelFilter, guFilter, dongFilter, timeFilterEnabled, timeFilterCutoff]);
 
   useEffect(() => {
     syncMarkers();
