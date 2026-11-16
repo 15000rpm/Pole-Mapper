@@ -17,11 +17,14 @@
 - `server/db.js` — @supabase/supabase-js 클라이언트 (gus/dongs/poles 테이블, 전부 async)
 - `server/vworld.js` — VWorld `GetFeature` 조회, 페이지네이션(최대 20페이지)
 - `supabase-schema.sql` — Supabase SQL Editor에서 실행할 스키마
-- `vite.config.js` — HTTPS 필수 (`~/.vite-key.pem`, `~/.vite-cert.pem` 요구), `/api`, `/uploads` 프록시 → :4000
+- `vite.config.js` — HTTPS 사용 (`~/.vite-key.pem`, `~/.vite-cert.pem`; 없으면 openssl로 자동 생성, 경로는 `VITE_HTTPS_KEY`/`VITE_HTTPS_CERT`로 재정의 가능), `/api`, `/uploads` 프록시 → :4000
 
 ## 환경 설정 (.env)
 
 `VWORLD_API_KEY`, `VWORLD_DOMAIN=localhost`, `PORT=4000`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (서버용 `.env`)
+
+- 클라이언트(Vite)는 `VITE_` 접두사만 노출하므로 지도 타일용 키는 `VITE_VWORLD_API_KEY`로 둔다
+- `.env`는 `.gitignore`에 포함됨. 새 환경에서는 `.env.example`을 복사해 값을 채운다
 
 ## 현재 상태 (진행 중인 작업)
 
@@ -29,7 +32,7 @@
   - 스키마는 `supabase-schema.sql`을 SQL Editor에서 실행해야 함
   - 서버에서 `SUPABASE_SERVICE_ROLE_KEY`를 사용 (서버가 곧 신뢰 경계)
 - 클라이언트는 `/api/poles` API로 CRUD (사진은 multer로 `server/uploads/`에 저장, base64/loccalStorage 제거됨)
-- `src/App.jsx:16`에 VWorld API 키가 하드코딩됨 → `import.meta.env.VITE_VWORLD_API_KEY`로 교체 필요 (키는 커밋하지 말 것)
+- VWorld 지도 타일 키는 `src/App.jsx`에서 `import.meta.env.VITE_VWORLD_API_KEY`로 읽음 (하드코딩 없음, 키는 커밋하지 말 것)
 - 위치 결정 우선순위: EXIF GPS → 브라우저 GPS → 마지막 알려진 위치
 - dev용 VWorld 키는 `VITE_VWORLD_API_KEY`로도 넘길 수 있음 (`server/vworld.js`에서 서버 키에 대해 폴백)
 

@@ -23,6 +23,12 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 const app = express();
 app.use(cors());
+// API 응답은 항상 최신 데이터를 쓰도록 캐시를 금지한다.
+// (Apache의 ExpiresDefault가 1개월 캐시를 붙이는 것을 막는다)
+app.use('/api', (_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 app.use(express.json());
 app.use('/uploads', express.static(UPLOAD_DIR));
 

@@ -109,14 +109,26 @@ export async function getPole(id) {
 }
 
 export async function getAllPoles({ gu = '', dong = '', start = '', end = '' } = {}) {
-  let query = supabase.from('poles').select('*').order('timestamp', { ascending: false });
-  if (gu) query = query.eq('gu', gu);
-  if (dong) query = query.eq('dong', dong);
-  if (start) query = query.gte('timestamp', start);
-  if (end) query = query.lte('timestamp', end);
-  const { data, error } = await query;
-  if (error) throw error;
-  return (data || []).map((p) => ({
+  // Supabase(PostgREST)는 한 번에 최대 1000행만 돌려주므로 페이지 단위로 모두 읽는다.
+  const PAGE = 1000;
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    let query = supabase
+      .from('poles')
+      .select('*')
+      .order('timestamp', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (gu) query = query.eq('gu', gu);
+    if (dong) query = query.eq('dong', dong);
+    if (start) query = query.gte('timestamp', start);
+    if (end) query = query.lte('timestamp', end);
+    const { data, error } = await query;
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
+  return rows.map((p) => ({
     ...p,
     photoUrl: p.photo_path ? `/uploads/${p.photo_path}` : null,
   }));

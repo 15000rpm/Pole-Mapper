@@ -10,11 +10,26 @@ import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
 import { Style, Circle as CircleStyle, Fill, Stroke, Text } from 'ol/style';
 import { fromLonLat } from 'ol/proj';
-import imageCompression from 'browser-image-compression';
-import exifr from 'exifr';
 import './App.css';
 
+// 사진 처리 라이브러리는 업로드 시점에만 필요하므로 동적 import로 분리한다.
+// (초기 번들 크기를 줄이고, 첫 화면 로딩을 빠르게 한다)
+let exifrPromise;
+function loadExifr() {
+  exifrPromise ??= import('exifr');
+  return exifrPromise;
+}
+
+let imageCompressionPromise;
+function loadImageCompression() {
+  imageCompressionPromise ??= import('browser-image-compression').then((m) => m.default);
+  return imageCompressionPromise;
+}
+
 const VWORLD_API_KEY = import.meta.env.VITE_VWORLD_API_KEY;
+if (!VWORLD_API_KEY) {
+  console.warn('[vworld] VITE_VWORLD_API_KEY가 없습니다. .env에 키를 설정해야 지도 타일이 표시됩니다.');
+}
 const LEVEL_COLORS = { A: '#22c55e', B: '#f97316', Pole: '#a855f7' };
 const LEVEL_LABELS = { A: 'A', B: 'B', Pole: 'P' };
 const LEVEL_IGNORE = 'IGNORE';
@@ -192,7 +207,7 @@ function App() {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      const res = await fetch('/api/poles');
+      const res = await fetch('/api/poles', { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const next = await res.json();
       polesRef.current = next;
@@ -415,8 +430,8 @@ function App() {
         markerSource.addFeature(currentFeature);
         currentLocationRef.current = currentFeature;
         Promise.allSettled([
-          fetch('/api/poles').then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
-          fetch('/api/all-dongs').then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+          fetch('/api/poles', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+          fetch('/api/all-dongs', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
         ])
           .then(([poleResult, dongResult]) => {
             if (aborted) return;
@@ -507,7 +522,8 @@ function App() {
       try {
         const buffer = await file.arrayBuffer();
         console.log('파일 타입:', file.type, '크기:', file.size, 'buffer 크기:', buffer.byteLength);
-        const exifData = await exifr.parse(buffer);
+        const { parse: parseExif } = await loadExifr();
+        const exifData = await parseExif(buffer);
         console.log('EXIF 전체 데이터:', exifData);
         if (exifData && exifData.latitude && exifData.longitude) {
           lat = exifData.latitude;
@@ -550,7 +566,8 @@ function App() {
         return;
       }
 
-      const compressed = await imageCompression(file, {
+      const compressImage = await loadImageCompression();
+      const compressed = await compressImage(file, {
         maxSizeMB: 0.5,
         maxWidthOrHeight: 800,
         useWebWorker: true,
@@ -610,7 +627,8 @@ function App() {
       let exifTimestamp = null;
       try {
         const buffer = await file.arrayBuffer();
-        const exifData = await exifr.parse(buffer);
+        const { parse: parseExif } = await loadExifr();
+        const exifData = await parseExif(buffer);
         if (exifData && exifData.latitude && exifData.longitude) {
           lat = exifData.latitude;
           lng = exifData.longitude;
@@ -699,7 +717,8 @@ function App() {
       }
 
       try {
-        const compressed = await imageCompression(prep.file, {
+        const compressImage = await loadImageCompression();
+        const compressed = await compressImage(prep.file, {
           maxSizeMB: 0.5,
           maxWidthOrHeight: 800,
           useWebWorker: true,
